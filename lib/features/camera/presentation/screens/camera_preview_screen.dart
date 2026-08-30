@@ -6,6 +6,7 @@ import '../../../../core/storage/file_storage.dart';
 import '../../../../core/storage/hive_storage.dart';
 import '../../../sync/data/sync_repository_impl.dart';
 import '../../../sync/domain/upload_item.dart';
+import '../../../sync/presentation/screens/PendingUploadsScreen.dart';
 import '../../data/camera_service.dart';
 import '../controller/camera_controller.dart';
 
@@ -387,7 +388,26 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
               ),
             ),
           ),
-
+          Positioned(
+            top: 50,
+            left: 20,
+            child: IconButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                    const PendingUploadsScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(
+                Icons.cloud_upload,
+                color: Colors.white,
+                size: 30,
+              ),
+            ),
+          ),
           if (_focusPosition != null)
             Positioned(
               left: _focusPosition!.dx - 35,
