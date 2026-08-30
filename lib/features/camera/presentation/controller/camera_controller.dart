@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:camera/camera.dart';
 import '../../data/camera_service.dart';
 
@@ -76,5 +78,36 @@ class CameraScreenController {
 
   Future<void> dispose() async {
     await cameraController?.dispose();
+  }
+
+  Future<void> setFocusPoint(Offset point) async {
+    if (cameraController == null) return;
+
+    try {
+      await cameraController!.setFocusPoint(point);
+    } catch (e) {
+      print('Focus failed: $e');
+    }
+  }
+
+  Future<XFile?> takePicture() async {
+    if (cameraController == null) {
+      return null;
+    }
+
+    if (!cameraController!.value.isInitialized) {
+      return null;
+    }
+
+    if (cameraController!.value.isTakingPicture) {
+      return null;
+    }
+
+    try {
+      return await cameraController!.takePicture();
+    } catch (e) {
+      print('Taking picture failed: $e');
+      return null;
+    }
   }
 }

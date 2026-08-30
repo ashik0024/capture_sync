@@ -16,7 +16,7 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
   late final CameraScreenController controller;
 
   double _initialZoom = 1.0;
-
+  Offset? _focusPosition;
   @override
   void initState() {
     super.initState();
@@ -27,7 +27,35 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
 
     _initializeCamera();
   }
+  Future<void> _handleTapToFocus(
+      TapUpDetails details,
+      BuildContext context,
+      ) async {
+    final screenSize = MediaQuery.of(context).size;
 
+    final tapPosition = details.localPosition;
+
+    final focusPoint = Offset(
+      tapPosition.dx / screenSize.width,
+      tapPosition.dy / screenSize.height,
+    );
+
+    await controller.setFocusPoint(focusPoint);
+
+    setState(() {
+      _focusPosition = tapPosition;
+    });
+
+    await Future.delayed(
+      const Duration(seconds: 1),
+    );
+
+    if (mounted) {
+      setState(() {
+        _focusPosition = null;
+      });
+    }
+  }
   Future<void> _initializeCamera() async {
     try {
       await controller.initialize();
@@ -123,6 +151,16 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
     }
   }
 
+  Future<void> _captureImage() async {
+    final image = await controller.takePicture();
+
+    if (image == null) {
+      return;
+    }
+
+    debugPrint('Image captured: ${image.path}');
+  }
+
   @override
   void dispose() {
     controller.dispose();
@@ -155,6 +193,12 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
 
           Positioned.fill(
             child: GestureDetector(
+              onTapUp: (details) {
+                _handleTapToFocus(
+                  details,
+                  context,
+                );
+              },
               onScaleStart: _onScaleStart,
               onScaleUpdate: _onScaleUpdate,
               child: CameraPreview(
@@ -253,26 +297,52 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
             left: 0,
             right: 0,
             child: Center(
-              child: Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white,
-                    width: 4,
+              child: GestureDetector(
+                onTap: _captureImage,
+                child: Container(
+                  width: 70,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white,
+                      width: 4,
+                    ),
                   ),
-                ),
-                child: const Center(
-                  child: Icon(
-                    Icons.camera_alt,
-                    color: Colors.white,
-                    size: 35,
+                  child: const Center(
+                    child: Icon(
+                      Icons.camera_alt,
+                      color: Colors.white,
+                      size: 35,
+                    ),
                   ),
                 ),
               ),
             ),
           ),
+
+          if (_focusPosition != null)
+            Positioned(
+              left: _focusPosition!.dx - 35,
+              top: _focusPosition!.dy - 35,
+              child: Container(
+                width: 70,
+                height: 70,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Colors.yellow,
+                    width: 2,
+                  ),
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.add,
+                    color: Colors.yellow,
+                    size: 30,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
