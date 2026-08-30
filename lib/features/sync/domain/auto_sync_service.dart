@@ -3,7 +3,15 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../../core/network/connectivity_service.dart';
+import '../data/sync_repository_impl.dart';
 import 'sync_engine.dart';
+
+enum SyncEvent {
+  offline,
+  syncStarted,
+  syncCompleted,
+  syncFailed,
+}
 
 class AutoSyncService {
   final ConnectivityService connectivityService;
@@ -12,6 +20,10 @@ class AutoSyncService {
   StreamSubscription<List<ConnectivityResult>>?
   _connectivitySubscription;
 
+  final StreamController<SyncEvent>
+  _syncEventController =
+  StreamController<SyncEvent>.broadcast();
+
   bool _isSyncing = false;
 
   AutoSyncService({
@@ -19,8 +31,19 @@ class AutoSyncService {
     required this.syncEngine,
   });
 
+  // ---------------------------------------------------------
+  // EVENTS
+  // ---------------------------------------------------------
+
+  Stream<SyncEvent> get syncEvents =>
+      _syncEventController.stream;
+
+  // ---------------------------------------------------------
+  // START
+  // ---------------------------------------------------------
+
   Future<void> start() async {
-    print('AutoSync: Starting...');
+    print('AutoSync: Service started');
 
     _connectivitySubscription =
         connectivityService
@@ -29,9 +52,13 @@ class AutoSyncService {
           _onConnectivityChanged,
         );
 
-    // Check once when application starts.
+    // Check immediately when app starts.
     await sync();
   }
+
+  // ---------------------------------------------------------
+  // CONNECTIVITY CHANGED
+  // ---------------------------------------------------------
 
   Future<void> _onConnectivityChanged(
       List<ConnectivityResult> result,
@@ -40,11 +67,18 @@ class AutoSyncService {
       'AutoSync: Connectivity changed: $result',
     );
 
-    if (result.contains(
+    final hasNetwork =
+    !result.contains(
       ConnectivityResult.none,
-    )) {
+    );
+
+    if (!hasNetwork) {
       print(
-        'AutoSync: Device is offline',
+        'AutoSync: Network unavailable',
+      );
+
+      _syncEventController.add(
+        SyncEvent.offline,
       );
 
       return;
@@ -54,9 +88,18 @@ class AutoSyncService {
       'AutoSync: Network detected',
     );
 
-    // Network type exists, now verify actual internet.
+    // Small delay gives the device time to
+    // establish the actual internet connection.
+    await Future.delayed(
+      const Duration(seconds: 1),
+    );
+
     await sync();
   }
+
+  // ---------------------------------------------------------
+  // SYNC
+  // ---------------------------------------------------------
 
   Future<void> sync() async {
     if (_isSyncing) {
@@ -68,12 +111,16 @@ class AutoSyncService {
     }
 
     final hasInternet =
-    await connectivityService.hasInternetConnection();
+    await connectivityService
+        .hasInternetConnection();
 
     if (!hasInternet) {
       print(
-        'AutoSync: No internet. '
-            'Keeping queue untouched.',
+        'AutoSync: Still offline',
+      );
+
+      _syncEventController.add(
+        SyncEvent.offline,
       );
 
       return;
@@ -86,17 +133,52 @@ class AutoSyncService {
         'AutoSync: Starting sync...',
       );
 
-      await syncEngine.syncPendingUploads();
+      _syncEventController.add(
+        SyncEvent.syncStarted,
+      );
 
+      final success =
+      await syncEngine
+          .syncPendingUploads();
+
+      if (success) {
+        print(
+          'AutoSync: Sync completed',
+        );
+
+        _syncEventController.add(
+          SyncEvent.syncCompleted,
+        );
+      } else {
+        print(
+          'AutoSync: Some uploads failed',
+        );
+
+        _syncEventController.add(
+          SyncEvent.syncFailed,
+        );
+      }
+    } catch (e) {
       print(
-        'AutoSync: Sync completed',
+        'AutoSync: Sync error: $e',
+      );
+
+      _syncEventController.add(
+        SyncEvent.syncFailed,
       );
     } finally {
       _isSyncing = false;
     }
   }
 
+  // ---------------------------------------------------------
+  // DISPOSE
+  // ---------------------------------------------------------
+
   Future<void> dispose() async {
-    await _connectivitySubscription?.cancel();
+    await _connectivitySubscription
+        ?.cancel();
+
+    await _syncEventController.close();
   }
 }

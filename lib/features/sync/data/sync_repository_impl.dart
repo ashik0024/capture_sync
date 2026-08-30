@@ -29,7 +29,8 @@ class SyncRepositoryImpl implements SyncRepository {
       final item = UploadItem.fromMap(value);
 
       if (item.status == UploadStatus.pending ||
-          item.status == UploadStatus.failed) {
+          item.status == UploadStatus.failed ||
+          item.status == UploadStatus.uploading) {
         items.add(item);
       }
     }
@@ -109,6 +110,35 @@ class SyncRepositoryImpl implements SyncRepository {
       localPath: item.localPath,
       status: UploadStatus.failed,
       retryCount: item.retryCount + 1,
+      createdAt: item.createdAt,
+      uploadedAt: item.uploadedAt,
+    );
+
+    await _box.put(
+      id,
+      updatedItem.toMap(),
+    );
+  }
+
+  // -----------------------------------------
+  // MARK PENDING
+  // -----------------------------------------
+
+  Future<void> markPending(
+      String id,
+      ) async {
+    final existing = _box.get(id);
+
+    if (existing == null) return;
+
+    final item = UploadItem.fromMap(existing);
+
+    final updatedItem = UploadItem(
+      id: item.id,
+      batchId: item.batchId,
+      localPath: item.localPath,
+      status: UploadStatus.pending,
+      retryCount: item.retryCount,
       createdAt: item.createdAt,
       uploadedAt: item.uploadedAt,
     );

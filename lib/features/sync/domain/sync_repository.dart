@@ -1,4 +1,4 @@
-import 'upload_item.dart';
+import 'package:capture_sync/features/sync/domain/upload_item.dart';
 
 abstract class SyncRepository {
   Future<void> addUploadItem(
@@ -16,6 +16,10 @@ abstract class SyncRepository {
       );
 
   Future<void> markFailed(
+      String id,
+      );
+
+  Future<void> markPending(
       String id,
       );
 }

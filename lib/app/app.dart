@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../features/camera/presentation/screens/camera_preview_screen.dart';
 
 class CaptureSyncApp extends StatelessWidget {
-  const CaptureSyncApp({super.key});
+  const CaptureSyncApp({
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -19,13 +21,17 @@ class CaptureSyncApp extends StatelessWidget {
 }
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('CaptureSync'),
+        title: const Text(
+          'CaptureSync',
+        ),
       ),
       body: const Center(
         child: Text(

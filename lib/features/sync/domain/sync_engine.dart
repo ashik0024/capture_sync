@@ -13,20 +13,33 @@ class SyncEngine {
     required this.api,
   });
 
-  Future<void> syncPendingUploads() async {
+  Future<bool> syncPendingUploads() async {
     final pendingItems =
     await repository.getPendingUploads();
 
     print(
-      'SyncEngine: ${pendingItems.length} items found',
+      'SyncEngine: '
+          '${pendingItems.length} items found',
     );
 
-    for (final item in pendingItems) {
-      await _uploadItem(item);
+    if (pendingItems.isEmpty) {
+      return true;
     }
+
+    bool allSuccessful = true;
+
+    for (final item in pendingItems) {
+      final success = await _uploadItem(item);
+
+      if (!success) {
+        allSuccessful = false;
+      }
+    }
+
+    return allSuccessful;
   }
 
-  Future<void> _uploadItem(
+  Future<bool> _uploadItem(
       UploadItem item,
       ) async {
     try {
@@ -46,7 +59,7 @@ class SyncEngine {
           item.id,
         );
 
-        return;
+        return false;
       }
 
       await repository.markUploading(
@@ -65,6 +78,24 @@ class SyncEngine {
         'SyncEngine: Upload successful '
             '${item.id}',
       );
+
+      return true;
+
+    } on SocketException catch (e) {
+      print(
+        'SyncEngine: No internet ${item.id}',
+      );
+
+      print(
+        'SyncEngine Error: $e',
+      );
+
+      // Keep image in queue.
+      await repository.markPending(
+        item.id,
+      );
+
+      return false;
     } catch (e) {
       print(
         'SyncEngine: Upload failed '
@@ -78,6 +109,8 @@ class SyncEngine {
       await repository.markFailed(
         item.id,
       );
+
+      return false;
     }
   }
 }
