@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../features/camera/presentation/screens/camera_preview_screen.dart';
+
 class CaptureSyncApp extends StatelessWidget {
   const CaptureSyncApp({super.key});
 
@@ -11,7 +13,7 @@ class CaptureSyncApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
       ),
-      home: const HomeScreen(),
+      home: const CameraPreviewScreen(),
     );
   }
 }
