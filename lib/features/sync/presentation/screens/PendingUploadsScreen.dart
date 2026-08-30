@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../../core/storage/hive_storage.dart';
+import '../../data/mock_upload_api.dart';
 import '../../data/sync_repository_impl.dart';
+import '../../domain/sync_engine.dart';
 import '../../domain/upload_item.dart';
 
 class PendingUploadsScreen extends StatefulWidget {
@@ -24,16 +26,34 @@ class _PendingUploadsScreenState
   List<UploadItem> _items = [];
 
   bool _isLoading = true;
+  late final SyncEngine _syncEngine;
 
   @override
   void initState() {
     super.initState();
 
+    final storage = HiveStorage();
+
     _repository = SyncRepositoryImpl(
-      HiveStorage(),
+      storage,
+    );
+
+    _syncEngine = SyncEngine(
+      repository: _repository,
+      api: MockUploadApi(),
     );
 
     _loadUploads();
+  }
+
+  Future<void> _syncNow() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    await _syncEngine.syncPendingUploads();
+
+    await _loadUploads();
   }
 
   Future<void> _loadUploads() async {
@@ -59,6 +79,14 @@ class _PendingUploadsScreenState
         title: const Text(
           'Pending Uploads',
         ),
+        actions: [
+          IconButton(
+            onPressed: _syncNow,
+            icon: const Icon(
+              Icons.sync,
+            ),
+          ),
+        ],
       ),
       body: _buildBody(),
     );
