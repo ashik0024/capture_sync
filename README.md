@@ -86,11 +86,15 @@ lib/
 │   │       │
 │   │       └── screens/
 │   │           └── CameraPreviewScreen.dart
+│   │       └── widget/
+│   │           └── cameraControls.dart
+│   │           └── cameraPreviewWidget.dart
+│   │           └── tapToFocusIndicator.dart
 │   │
 │   └── sync/
 │       ├── data/
 │       │   ├── mock_upload_api.dart
-│       │   └── sync_repository_impl.dart
+│       │   └── syncRepositoryImpl.dart
 │       │
 │       ├── domain/
 │       │   ├── auto_sync_service.dart
@@ -100,7 +104,12 @@ lib/
 │       │
 │       └── presentation/
 │           └── screens/
-│               └── PendingUploadsScreen.dart
+│               └── pendingUploadsScreen.dart
+│           └── widget/
+│               └── batchProgressSection.dart
+│               └── syncActionButton.dart
+│               └── uploadHeaderBar.dart
+│               └── uploadItemCard.dart
 │
 └── main.dart
 ```
