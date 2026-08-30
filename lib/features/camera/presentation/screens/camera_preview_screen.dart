@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../../core/storage/file_storage.dart';
 import '../../../../core/storage/hive_storage.dart';
+import '../../../../core/worker/background_sync_service.dart';
 import '../../../sync/data/sync_repository_impl.dart';
 import '../../../sync/domain/upload_item.dart';
 import '../../../sync/presentation/screens/PendingUploadsScreen.dart';
@@ -200,7 +201,7 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
       await _syncRepository.addUploadItem(
         uploadItem,
       );
-
+      await BackgroundSyncService.registerOneTimeSync();
       debugPrint(
         'Image saved and queued',
       );

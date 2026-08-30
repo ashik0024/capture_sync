@@ -8,11 +8,10 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Hive
-  final hiveStorage = HiveStorage();
+  final storage = HiveStorage();
+  await storage.init();
 
-  await hiveStorage.init();
-
-  // Initialize all application services
+  // Initialize all services
   await ServiceLocator.init();
 
   // Start application
