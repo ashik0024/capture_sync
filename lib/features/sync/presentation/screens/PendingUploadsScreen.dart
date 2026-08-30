@@ -8,6 +8,11 @@ import '../../data/sync_repository_impl.dart';
 import '../../domain/sync_engine.dart';
 import '../../domain/upload_item.dart';
 
+
+
+import '../../../../core/network/connectivity_service.dart';
+
+
 class PendingUploadsScreen extends StatefulWidget {
   const PendingUploadsScreen({
     super.key,
@@ -20,13 +25,13 @@ class PendingUploadsScreen extends StatefulWidget {
 
 class _PendingUploadsScreenState
     extends State<PendingUploadsScreen> {
-
   late final SyncRepositoryImpl _repository;
+
+  late final SyncEngine _syncEngine;
 
   List<UploadItem> _items = [];
 
   bool _isLoading = true;
-  late final SyncEngine _syncEngine;
 
   @override
   void initState() {
@@ -38,38 +43,74 @@ class _PendingUploadsScreenState
       storage,
     );
 
+    // Connectivity service
+    final connectivityService =
+    ConnectivityService();
+
+    // Connectivity-aware Mock API
+    final mockApi = MockUploadApi(
+      connectivityService: connectivityService,
+      shouldFail: false,
+    );
+
+    // Sync Engine
     _syncEngine = SyncEngine(
       repository: _repository,
-      api: MockUploadApi(),
+      api: mockApi,
     );
 
     _loadUploads();
   }
 
   Future<void> _syncNow() async {
+    if (_isLoading) {
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
 
-    await _syncEngine.syncPendingUploads();
+    try {
+      await _syncEngine.syncPendingUploads();
+    } catch (e) {
+      debugPrint(
+        'Manual sync failed: $e',
+      );
+    }
 
     await _loadUploads();
   }
 
   Future<void> _loadUploads() async {
-    setState(() {
-      _isLoading = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
 
-    final items =
-    await _repository.getPendingUploads();
+    try {
+      final items =
+      await _repository.getPendingUploads();
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() {
-      _items = items;
-      _isLoading = false;
-    });
+      setState(() {
+        _items = items;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint(
+        'Failed to load uploads: $e',
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _items = [];
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -81,7 +122,8 @@ class _PendingUploadsScreenState
         ),
         actions: [
           IconButton(
-            onPressed: _syncNow,
+            onPressed:
+            _isLoading ? null : _syncNow,
             icon: const Icon(
               Icons.sync,
             ),
@@ -145,13 +187,11 @@ class _UploadItemCard extends StatelessWidget {
         child: Row(
           children: [
             _buildImage(),
-
             const SizedBox(width: 12),
-
             Expanded(
               child: _buildDetails(),
             ),
-
+            const SizedBox(width: 8),
             _buildStatus(),
           ],
         ),
@@ -190,9 +230,9 @@ class _UploadItemCard extends StatelessWidget {
       crossAxisAlignment:
       CrossAxisAlignment.start,
       children: [
-        Text(
+        const Text(
           'Batch',
-          style: const TextStyle(
+          style: TextStyle(
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -299,3 +339,4 @@ class _StatusBadge extends StatelessWidget {
     }
   }
 }
+

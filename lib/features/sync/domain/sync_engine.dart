@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import '../data/mock_upload_api.dart';
-
 import '../data/sync_repository_impl.dart';
 import 'upload_item.dart';
 
@@ -19,8 +18,7 @@ class SyncEngine {
     await repository.getPendingUploads();
 
     print(
-      'SyncEngine: '
-          '${pendingItems.length} items found',
+      'SyncEngine: ${pendingItems.length} items found',
     );
 
     for (final item in pendingItems) {
@@ -73,7 +71,9 @@ class SyncEngine {
             '${item.id}',
       );
 
-      print(e);
+      print(
+        'SyncEngine Error: $e',
+      );
 
       await repository.markFailed(
         item.id,
