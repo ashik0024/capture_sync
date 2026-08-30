@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 
 import 'app/app.dart';
+import 'core/storage/hive_storage.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  runApp(const CaptureSyncApp());
+  final hiveStorage = HiveStorage();
+
+  await hiveStorage.init();
+
+  runApp(
+    const CaptureSyncApp(),
+  );
 }

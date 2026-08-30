@@ -1,6 +1,11 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../../../core/storage/file_storage.dart';
+import '../../../../core/storage/hive_storage.dart';
+import '../../../sync/data/sync_repository_impl.dart';
+import '../../../sync/domain/upload_item.dart';
 import '../../data/camera_service.dart';
 import '../controller/camera_controller.dart';
 
@@ -17,9 +22,23 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
 
   double _initialZoom = 1.0;
   Offset? _focusPosition;
+
+  final FileStorage _fileStorage = FileStorage();
+  final Uuid _uuid = const Uuid();
+  late final String batchId;
+  final HiveStorage _hiveStorage = HiveStorage();
+
+  late final SyncRepositoryImpl _syncRepository;
+
   @override
   void initState() {
     super.initState();
+
+    batchId = const Uuid().v4();
+
+    _syncRepository = SyncRepositoryImpl(
+      _hiveStorage,
+    );
 
     controller = CameraScreenController(
       CameraService(),
@@ -158,7 +177,55 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
       return;
     }
 
-    debugPrint('Image captured: ${image.path}');
+    try {
+      final imageId = const Uuid().v4();
+
+      final fileName = '${batchId}_$imageId.jpg';
+
+      final savedPath = await _fileStorage.saveImage(
+        image.path,
+        fileName,
+      );
+
+      final uploadItem = UploadItem(
+        id: imageId,
+        batchId: batchId,
+        localPath: savedPath,
+        status: UploadStatus.pending,
+        retryCount: 0,
+        createdAt: DateTime.now(),
+      );
+
+      await _syncRepository.addUploadItem(
+        uploadItem,
+      );
+
+      debugPrint(
+        'Image saved and queued',
+      );
+
+      debugPrint(
+        'Path: $savedPath',
+      );
+
+      debugPrint(
+        'Status: ${uploadItem.status.name}',
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Image added to upload queue',
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint(
+        'Capture processing failed: $e',
+      );
+    }
   }
 
   @override
