@@ -10,13 +10,17 @@ import '../../../sync/domain/upload_item.dart';
 import '../../../sync/presentation/screens/PendingUploadsScreen.dart';
 import '../../data/camera_service.dart';
 import '../controller/camera_controller.dart';
+import 'dart:io';
+import 'package:flutter/services.dart';
+import '../widgets/camera_preview_widget.dart';
+import '../widgets/camera_controls.dart';
+import '../widgets/tap_focus_indicator.dart';
 
 class CameraPreviewScreen extends StatefulWidget {
   const CameraPreviewScreen({super.key});
 
   @override
-  State<CameraPreviewScreen> createState() =>
-      _CameraPreviewScreenState();
+  State<CameraPreviewScreen> createState() => _CameraPreviewScreenState();
 }
 
 class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
@@ -24,6 +28,8 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
 
   double _initialZoom = 1.0;
   Offset? _focusPosition;
+  bool _flashOn = false;
+  bool _showCaptureFlash = false;
 
   final FileStorage _fileStorage = FileStorage();
   final Uuid _uuid = const Uuid();
@@ -32,28 +38,27 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
 
   late final SyncRepositoryImpl _syncRepository;
 
+  // Tracks images captured into the current batch, for the thumbnail + counter.
+  final List<String> _batchPaths = [];
+
   @override
   void initState() {
     super.initState();
 
     batchId = const Uuid().v4();
 
-    _syncRepository = SyncRepositoryImpl(
-      _hiveStorage,
-    );
+    _syncRepository = SyncRepositoryImpl(_hiveStorage);
 
-    controller = CameraScreenController(
-      CameraService(),
-    );
+    controller = CameraScreenController(CameraService());
 
     _initializeCamera();
   }
+
   Future<void> _handleTapToFocus(
       TapUpDetails details,
       BuildContext context,
       ) async {
     final screenSize = MediaQuery.of(context).size;
-
     final tapPosition = details.localPosition;
 
     final focusPoint = Offset(
@@ -63,89 +68,81 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
 
     await controller.setFocusPoint(focusPoint);
 
-    setState(() {
-      _focusPosition = tapPosition;
-    });
+    setState(() => _focusPosition = tapPosition);
 
-    await Future.delayed(
-      const Duration(seconds: 1),
-    );
+    await Future.delayed(const Duration(seconds: 1));
 
     if (mounted) {
-      setState(() {
-        _focusPosition = null;
-      });
+      setState(() => _focusPosition = null);
     }
   }
+
   Future<void> _initializeCamera() async {
     try {
       await controller.initialize();
-
-      if (mounted) {
-        setState(() {});
-      }
+      if (mounted) setState(() {});
     } catch (e) {
       debugPrint('Camera initialization failed: $e');
     }
   }
 
   // -----------------------------
+  // FLASH
+  // -----------------------------
+  Future<void> _toggleFlash() async {
+    final cam = controller.cameraController;
+    if (cam == null) return;
+
+    try {
+      final newValue = !_flashOn;
+      await cam.setFlashMode(newValue ? FlashMode.torch : FlashMode.off);
+      setState(() => _flashOn = newValue);
+    } catch (e) {
+      debugPrint('Toggling flash failed: $e');
+    }
+  }
+
+  // -----------------------------
   // PINCH ZOOM
   // -----------------------------
-
   void _onScaleStart(ScaleStartDetails details) {
     _initialZoom = controller.currentZoom;
   }
 
   void _onScaleUpdate(ScaleUpdateDetails details) {
     final newZoom = _initialZoom * details.scale;
-
     controller.setZoom(newZoom);
-
     setState(() {});
   }
 
   // -----------------------------
-  // ZOOM BUTTON
+  // ZOOM PRESET BUTTON
   // -----------------------------
-
   Widget _buildZoomButton(double zoom) {
-    // Don't show button if device doesn't support this zoom.
-    if (zoom < controller.minZoom ||
-        zoom > controller.maxZoom) {
+    if (zoom < controller.minZoom || zoom > controller.maxZoom) {
       return const SizedBox.shrink();
     }
 
-    final isSelected =
-        (controller.currentZoom - zoom).abs() < 0.01;
+    final isSelected = (controller.currentZoom - zoom).abs() < 0.01;
 
     return GestureDetector(
       onTap: () async {
         await controller.setZoom(zoom);
-
-        if (mounted) {
-          setState(() {});
-        }
+        if (mounted) setState(() {});
       },
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 4),
-        padding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 8,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected
-              ? Colors.white
-              : Colors.black54,
+          color: isSelected ? Colors.white : Colors.black45,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
-          '${zoom}x',
+          zoom == zoom.roundToDouble() ? '${zoom.toInt()}x' : '${zoom}x',
           style: TextStyle(
-            color: isSelected
-                ? Colors.black
-                : Colors.white,
+            color: isSelected ? Colors.black : Colors.white,
             fontWeight: FontWeight.bold,
+            fontSize: 13,
           ),
         ),
       ),
@@ -155,39 +152,28 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
   // -----------------------------
   // SWITCH CAMERA
   // -----------------------------
-
   Future<void> _switchCamera() async {
-    if (controller.backCameras.length <= 1) {
-      return;
-    }
+    if (controller.backCameras.length <= 1) return;
 
     final nextIndex =
-        (controller.selectedCameraIndex + 1) %
-            controller.backCameras.length;
+        (controller.selectedCameraIndex + 1) % controller.backCameras.length;
 
     await controller.selectCamera(nextIndex);
-
-    if (mounted) {
-      setState(() {});
-    }
+    if (mounted) setState(() {});
   }
 
+  // -----------------------------
+  // CAPTURE
+  // -----------------------------
   Future<void> _captureImage() async {
     final image = await controller.takePicture();
-
-    if (image == null) {
-      return;
-    }
+    if (image == null) return;
 
     try {
       final imageId = const Uuid().v4();
-
       final fileName = '${batchId}_$imageId.jpg';
 
-      final savedPath = await _fileStorage.saveImage(
-        image.path,
-        fileName,
-      );
+      final savedPath = await _fileStorage.saveImage(image.path, fileName);
 
       final uploadItem = UploadItem(
         id: imageId,
@@ -198,36 +184,44 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
         createdAt: DateTime.now(),
       );
 
-      await _syncRepository.addUploadItem(
-        uploadItem,
-      );
+      await _syncRepository.addUploadItem(uploadItem);
       await BackgroundSyncService.registerOneTimeSync();
-      debugPrint(
-        'Image saved and queued',
-      );
 
-      debugPrint(
-        'Path: $savedPath',
-      );
+      // tactile + audible feedback
+      try {
+        HapticFeedback.mediumImpact();
+        SystemSound.play(SystemSoundType.click);
+      } catch (_) {}
 
-      debugPrint(
-        'Status: ${uploadItem.status.name}',
-      );
+      // quick white flash overlay to indicate capture
+      if (mounted) setState(() => _showCaptureFlash = true);
+      await Future.delayed(const Duration(milliseconds: 180));
+      if (mounted) setState(() => _showCaptureFlash = false);
+
+      debugPrint('Image saved and queued');
+      debugPrint('Path: $savedPath');
+      debugPrint('Status: ${uploadItem.status.name}');
 
       if (!mounted) return;
 
+      setState(() => _batchPaths.add(savedPath));
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Image added to upload queue',
-          ),
-        ),
+        const SnackBar(content: Text('Image added to upload queue')),
       );
     } catch (e) {
-      debugPrint(
-        'Capture processing failed: $e',
-      );
+      debugPrint('Capture processing failed: $e');
     }
+  }
+
+  Future<void> _uploadBatch() async {
+    if (_batchPaths.isEmpty) return;
+    await BackgroundSyncService.registerOneTimeSync();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Uploading batch of ${_batchPaths.length}')),
+    );
   }
 
   @override
@@ -240,14 +234,10 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
   Widget build(BuildContext context) {
     final cameraController = controller.cameraController;
 
-    // Camera is still initializing
-    if (cameraController == null ||
-        !cameraController.value.isInitialized) {
+    if (cameraController == null || !cameraController.value.isInitialized) {
       return const Scaffold(
         backgroundColor: Colors.black,
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
+        body: Center(child: CircularProgressIndicator()),
       );
     }
 
@@ -255,181 +245,264 @@ class _CameraPreviewScreenState extends State<CameraPreviewScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-
           // =====================================
           // CAMERA PREVIEW
           // =====================================
-
           Positioned.fill(
-            child: GestureDetector(
-              onTapUp: (details) {
-                _handleTapToFocus(
-                  details,
-                  context,
-                );
-              },
+            child: CameraPreviewWidget(
+              cameraController: cameraController,
+              onTapUp: (details) => _handleTapToFocus(details, context),
               onScaleStart: _onScaleStart,
               onScaleUpdate: _onScaleUpdate,
-              child: CameraPreview(
-                cameraController,
+            ),
+          ),
+
+          // Subtle top/bottom vignette so white icons/text stay readable
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withOpacity(0.45),
+                      Colors.transparent,
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.55),
+                    ],
+                    stops: const [0.0, 0.18, 0.6, 1.0],
+                  ),
+                ),
               ),
             ),
           ),
 
-          // =====================================
-          // TOP CAMERA SWITCH BUTTON
-          // =====================================
+          // quick white flash when capturing
+          if (_showCaptureFlash)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: _showCaptureFlash ? 0.9 : 0.0,
+                  duration: const Duration(milliseconds: 120),
+                  child: Container(color: Colors.white),
+                ),
+              ),
+            ),
 
+          // =====================================
+          // TOP BAR: close / flash / settings
+          // =====================================
           Positioned(
-            top: 50,
-            right: 20,
-            child: IconButton(
-              onPressed: _switchCamera,
-              icon: const Icon(
-                Icons.flip_camera_ios,
-                color: Colors.white,
-                size: 30,
+            top: 44,
+            left: 12,
+            right: 12,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                ),
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: _toggleFlash,
+                      icon: Icon(
+                        _flashOn ? Icons.flash_on : Icons.flash_off,
+                        color: Colors.white,
+                        size: 26,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () {
+                        // TODO: wire up capture settings sheet
+                      },
+                      icon: const Icon(Icons.settings, color: Colors.white, size: 24),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // =====================================
+          // MODE LABEL
+          // =====================================
+          const Positioned(
+            top: 100,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Text(
+                'VISUAL',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 2,
+                ),
               ),
             ),
           ),
 
           // =====================================
-          // ZOOM BUTTONS
+          // VERTICAL ZOOM SLIDER (right edge)
           // =====================================
+          Positioned(
+            right: 4,
+            top: 170,
+            bottom: 260,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${controller.maxZoom.toStringAsFixed(0)}x',
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+                Expanded(
+                  child: RotatedBox(
+                    quarterTurns: 3,
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 2,
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                        activeTrackColor: Colors.white,
+                        inactiveTrackColor: Colors.white30,
+                        thumbColor: Colors.white,
+                      ),
+                      child: Slider(
+                        min: controller.minZoom,
+                        max: controller.maxZoom,
+                        value: controller.currentZoom.clamp(
+                          controller.minZoom,
+                          controller.maxZoom,
+                        ),
+                        onChanged: (value) async {
+                          await controller.setZoom(value);
+                          if (mounted) setState(() {});
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+                const Text(
+                  '1x',
+                  style: TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
 
+          // =====================================
+          // ZOOM PRESET BUTTONS
+          // =====================================
           Positioned(
             left: 0,
             right: 0,
-            bottom: 170,
+            bottom: 178,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _buildZoomButton(0.5),
                 _buildZoomButton(1.0),
                 _buildZoomButton(2.0),
-                _buildZoomButton(3.0),
               ],
             ),
           ),
 
           // =====================================
-          // ZOOM SLIDER
+          // THUMBNAIL / CAPTURE / SWITCH CAMERA
           // =====================================
-
-          Positioned(
-            left: 25,
-            right: 25,
-            bottom: 110,
-            child: Slider(
-              min: controller.minZoom,
-              max: controller.maxZoom,
-              value: controller.currentZoom.clamp(
-                controller.minZoom,
-                controller.maxZoom,
-              ),
-              onChanged: (value) async {
-                await controller.setZoom(value);
-
-                if (mounted) {
-                  setState(() {});
-                }
-              },
-            ),
-          ),
-
-          // =====================================
-          // CURRENT ZOOM TEXT
-          // =====================================
-
           Positioned(
             left: 0,
             right: 0,
-            bottom: 80,
-            child: Center(
-              child: Text(
-                '${controller.currentZoom.toStringAsFixed(1)}x',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-
-          // =====================================
-          // CAPTURE BUTTON
-          // =====================================
-
-          Positioned(
-            bottom: 20,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: GestureDetector(
-                onTap: _captureImage,
-                child: Container(
-                  width: 70,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white,
-                      width: 4,
-                    ),
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.camera_alt,
-                      color: Colors.white,
-                      size: 35,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 50,
-            left: 20,
-            child: IconButton(
-              onPressed: () {
+            bottom: 96,
+            child: CameraControls(
+              batchPaths: _batchPaths,
+              onCapture: _captureImage,
+              onSwitch: _switchCamera,
+              onOpenPending: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                    const PendingUploadsScreen(),
+                    builder: (_) => const PendingUploadsScreen(),
                   ),
                 );
               },
-              icon: const Icon(
-                Icons.cloud_upload,
-                color: Colors.white,
-                size: 30,
+            ),
+          ),
+
+          // =====================================
+          // LIVE VIEW LABEL
+          // =====================================
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 68,
+            child: Center(
+              child: Text(
+                'LIVE VIEW',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                ),
               ),
             ),
           ),
+
+          // =====================================
+          // UPLOAD BATCH BUTTON (full width)
+          // =====================================
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              top: false,
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: ElevatedButton(
+                  onPressed: _batchPaths.isEmpty ? null : _uploadBatch,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    disabledBackgroundColor: Colors.blue.withOpacity(0.4),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.upload, color: Colors.white, size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        'UPLOAD BATCH (${_batchPaths.length})',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // =====================================
+          // TAP-TO-FOCUS INDICATOR
+          // =====================================
           if (_focusPosition != null)
             Positioned(
               left: _focusPosition!.dx - 35,
               top: _focusPosition!.dy - 35,
-              child: Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: Colors.yellow,
-                    width: 2,
-                  ),
-                ),
-                child: const Center(
-                  child: Icon(
-                    Icons.add,
-                    color: Colors.yellow,
-                    size: 30,
-                  ),
-                ),
-              ),
+              child: TapToFocusIndicator(position: _focusPosition!),
             ),
         ],
       ),

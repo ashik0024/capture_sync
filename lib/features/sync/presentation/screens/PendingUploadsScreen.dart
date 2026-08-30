@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:io';
-
+import 'package:capture_sync/features/sync/presentation/screens/widget/sync_action_button.dart';
+import 'package:capture_sync/features/sync/presentation/screens/widget/upload_header_bar.dart';
+import 'package:capture_sync/features/sync/presentation/screens/widget/upload_item_card.dart';
+import 'package:capture_sync/features/sync/presentation/screens/upload_palette.dart';
 import 'package:flutter/material.dart';
-
 
 import '../../../../core/di/ServiceLocator.dart';
 import '../../../../core/network/connectivity_service.dart';
@@ -14,432 +15,165 @@ import '../../data/sync_repository_impl.dart';
 import '../../domain/auto_sync_service.dart';
 import '../../domain/sync_engine.dart';
 import '../../domain/upload_item.dart';
+import 'widget/batch_progress_section.dart';
+
+
 
 class PendingUploadsScreen extends StatefulWidget {
-  const PendingUploadsScreen({
-    super.key,
-  });
+  const PendingUploadsScreen({super.key});
 
   @override
-  State<PendingUploadsScreen> createState() =>
-      _PendingUploadsScreenState();
+  State<PendingUploadsScreen> createState() => _PendingUploadsScreenState();
 }
 
-class _PendingUploadsScreenState
-    extends State<PendingUploadsScreen> {
-
-  // =========================================================
+class _PendingUploadsScreenState extends State<PendingUploadsScreen> {
+  // ---------------------------------------------------------
   // DEPENDENCIES
-  // =========================================================
-
+  // ---------------------------------------------------------
   late final SyncRepositoryImpl _repository;
-
   late final SyncEngine _syncEngine;
+  late final ConnectivityService _connectivityService;
 
-  late final ConnectivityService
-  _connectivityService;
-
-  // =========================================================
+  // ---------------------------------------------------------
   // STATE
-  // =========================================================
-
+  // ---------------------------------------------------------
   List<UploadItem> _items = [];
-
   bool _isLoading = true;
-
   bool _isSyncing = false;
+  bool _hasInternet = true;
 
-  // =========================================================
-  // SYNC EVENT SUBSCRIPTION
-  // =========================================================
+  StreamSubscription<SyncEvent>? _syncSubscription;
 
-  StreamSubscription<SyncEvent>?
-  _syncSubscription;
-
-  // =========================================================
+  // ---------------------------------------------------------
   // INIT
-  // =========================================================
-
+  // ---------------------------------------------------------
   @override
   void initState() {
     super.initState();
 
-    // ---------------------------------------------------------
-    // STORAGE
-    // ---------------------------------------------------------
-
     final storage = HiveStorage();
+    _repository = SyncRepositoryImpl(storage);
 
-    _repository = SyncRepositoryImpl(
-      storage,
-    );
-
-    // ---------------------------------------------------------
-    // CONNECTIVITY
-    // ---------------------------------------------------------
-
-    _connectivityService =
-        ConnectivityService();
-
-    // ---------------------------------------------------------
-    // MOCK API
-    // ---------------------------------------------------------
+    _connectivityService = ConnectivityService();
 
     final mockApi = MockUploadApi(
-      connectivityService:
-      _connectivityService,
+      connectivityService: _connectivityService,
       shouldFail: false,
     );
-
-    // ---------------------------------------------------------
-    // SYNC ENGINE
-    // ---------------------------------------------------------
 
     _syncEngine = SyncEngine(
       repository: _repository,
       api: mockApi,
     );
 
-    // ---------------------------------------------------------
-    // LISTEN TO AUTO SYNC EVENTS
-    // ---------------------------------------------------------
-
     _syncSubscription =
-        ServiceLocator
-            .autoSyncService
-            .syncEvents
-            .listen(
-          _handleSyncEvent,
-        );
-
-    // ---------------------------------------------------------
-    // LOAD EXISTING UPLOADS
-    // ---------------------------------------------------------
+        ServiceLocator.autoSyncService.syncEvents.listen(_handleSyncEvent);
 
     _loadUploads();
+    _checkConnectivity();
   }
 
-  // =========================================================
-  // HANDLE AUTO SYNC EVENTS
-  // =========================================================
+  Future<void> _checkConnectivity() async {
+    final hasInternet = await _connectivityService.hasInternetConnection();
+    if (mounted) setState(() => _hasInternet = hasInternet);
+  }
 
-  Future<void> _handleSyncEvent(
-      SyncEvent event,
-      ) async {
-    if (!mounted) {
-      return;
-    }
-
-    print(
-      'PendingUploadsScreen: '
-          'Received event = $event',
-    );
+  // ---------------------------------------------------------
+  // AUTO SYNC EVENTS
+  // ---------------------------------------------------------
+  Future<void> _handleSyncEvent(SyncEvent event) async {
+    if (!mounted) return;
 
     switch (event) {
-
-    // -------------------------------------------------------
-    // OFFLINE
-    // -------------------------------------------------------
-
       case SyncEvent.offline:
-
-        print(
-          'PendingUploadsScreen: Device offline',
-        );
-
-        // We don't show a message here because
-        // this event can happen frequently.
-        //
-        // The message is already shown when the
-        // user tries to manually upload while offline.
-
+        setState(() => _hasInternet = false);
         break;
-
-    // -------------------------------------------------------
-    // SYNC STARTED
-    // -------------------------------------------------------
 
       case SyncEvent.syncStarted:
-
-        print(
-          'PendingUploadsScreen: '
-              'Automatic sync started',
-        );
-
-        if (!mounted) {
-          return;
-        }
-
         setState(() {
           _isSyncing = true;
+          _hasInternet = true;
         });
-
         break;
-
-    // -------------------------------------------------------
-    // SYNC COMPLETED
-    // -------------------------------------------------------
 
       case SyncEvent.syncCompleted:
-
-        print(
-          'PendingUploadsScreen: '
-              'Automatic sync completed',
-        );
-
-        // -----------------------------------------------------
-        // IMPORTANT
-        // Reload Hive.
-        //
-        // Uploaded items are no longer returned by
-        // getPendingUploads().
-        //
-        // Therefore they will disappear from the
-        // Pending Uploads list.
-        // -----------------------------------------------------
-
         await _loadUploads();
-
-        if (!mounted) {
-          return;
-        }
-
-        setState(() {
-          _isSyncing = false;
-        });
-
-        // -----------------------------------------------------
-        // SHOW SUCCESS MESSAGE
-        // -----------------------------------------------------
-
-        ScaffoldMessenger.of(context)
-            .hideCurrentSnackBar();
-
-        ScaffoldMessenger.of(context)
-            .showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Pending images uploaded successfully.',
-            ),
-            duration:
-            Duration(seconds: 4),
-          ),
-        );
-
+        if (!mounted) return;
+        setState(() => _isSyncing = false);
+        _showSnack('Pending images uploaded successfully.');
         break;
 
-    // -------------------------------------------------------
-    // SYNC FAILED
-    // -------------------------------------------------------
-
       case SyncEvent.syncFailed:
-
-        print(
-          'PendingUploadsScreen: '
-              'Automatic sync failed',
-        );
-
         await _loadUploads();
-
-        if (!mounted) {
-          return;
-        }
-
-        setState(() {
-          _isSyncing = false;
-        });
-
-        ScaffoldMessenger.of(context)
-            .hideCurrentSnackBar();
-
-        ScaffoldMessenger.of(context)
-            .showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Upload failed. '
-                  'Images remain in the pending queue.',
-            ),
-            duration:
-            Duration(seconds: 4),
-          ),
-        );
-
+        if (!mounted) return;
+        setState(() => _isSyncing = false);
+        _showSnack('Upload failed. Images remain in the pending queue.');
         break;
     }
   }
 
-  // =========================================================
+  // ---------------------------------------------------------
   // MANUAL SYNC
-  // =========================================================
-
+  // ---------------------------------------------------------
   Future<void> _syncNow() async {
+    if (_isSyncing) return;
 
-    if (_isSyncing) {
-      return;
-    }
+    setState(() => _isSyncing = true);
 
-    setState(() {
-      _isSyncing = true;
-    });
-
-    // ---------------------------------------------------------
-    // CHECK INTERNET
-    // ---------------------------------------------------------
-
-    final hasInternet =
-    await _connectivityService
-        .hasInternetConnection();
+    final hasInternet = await _connectivityService.hasInternetConnection();
 
     if (!hasInternet) {
-
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _isSyncing = false;
+        _hasInternet = false;
       });
-
-      ScaffoldMessenger.of(context)
-          .hideCurrentSnackBar();
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No internet connection. '
-                'Upload is not possible right now. '
-                'The image will be uploaded automatically '
-                'when internet is available.',
-          ),
-          duration:
-          Duration(seconds: 5),
-        ),
+      _showSnack(
+        'No internet connection. Upload is not possible right now. '
+            'The image will be uploaded automatically when internet is available.',
+        duration: const Duration(seconds: 5),
       );
-
       return;
     }
 
-    // ---------------------------------------------------------
-    // START MANUAL SYNC
-    // ---------------------------------------------------------
+    setState(() => _hasInternet = true);
 
     try {
+      final success = await _syncEngine.syncPendingUploads();
+      if (!mounted) return;
 
-      final success =
-      await _syncEngine
-          .syncPendingUploads();
-
-      if (!mounted) {
-        return;
-      }
-
-      if (success) {
-
-        ScaffoldMessenger.of(context)
-            .hideCurrentSnackBar();
-
-        ScaffoldMessenger.of(context)
-            .showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Images uploaded successfully.',
-            ),
-          ),
-        );
-
-      } else {
-
-        ScaffoldMessenger.of(context)
-            .hideCurrentSnackBar();
-
-        ScaffoldMessenger.of(context)
-            .showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Some images could not be uploaded. '
-                  'They remain in the pending queue.',
-            ),
-          ),
-        );
-      }
-
+      _showSnack(
+        success
+            ? 'Images uploaded successfully.'
+            : 'Some images could not be uploaded. They remain in the pending queue.',
+      );
     } catch (e) {
-
-      debugPrint(
-        'Manual sync failed: $e',
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context)
-          .hideCurrentSnackBar();
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Upload failed. '
-                'The image remains in the pending queue.',
-          ),
-        ),
-      );
+      debugPrint('Manual sync failed: $e');
+      if (!mounted) return;
+      _showSnack('Upload failed. The image remains in the pending queue.');
     }
 
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _isSyncing = false;
-    });
-
-    // ---------------------------------------------------------
-    // REFRESH UI
-    // ---------------------------------------------------------
-
+    if (!mounted) return;
+    setState(() => _isSyncing = false);
     await _loadUploads();
   }
 
-  // =========================================================
+  // ---------------------------------------------------------
   // LOAD PENDING UPLOADS
-  // =========================================================
-
+  // ---------------------------------------------------------
   Future<void> _loadUploads() async {
-
-    if (mounted) {
-      setState(() {
-        _isLoading = true;
-      });
-    }
+    if (mounted) setState(() => _isLoading = true);
 
     try {
-
-      final items =
-      await _repository
-          .getPendingUploads();
-
-      if (!mounted) {
-        return;
-      }
-
+      final items = await _repository.getPendingUploads();
+      if (!mounted) return;
       setState(() {
         _items = items;
         _isLoading = false;
       });
-
     } catch (e) {
-
-      debugPrint(
-        'Failed to load uploads: $e',
-      );
-
-      if (!mounted) {
-        return;
-      }
-
+      debugPrint('Failed to load uploads: $e');
+      if (!mounted) return;
       setState(() {
         _items = [];
         _isLoading = false;
@@ -447,92 +181,90 @@ class _PendingUploadsScreenState
     }
   }
 
-  // =========================================================
-  // DISPOSE
-  // =========================================================
-
-  @override
-  void dispose() {
-
-    _syncSubscription?.cancel();
-
-    super.dispose();
-  }
-
-  // =========================================================
-  // BUILD
-  // =========================================================
-
-  @override
-  Widget build(
-      BuildContext context,
-      ) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Pending Uploads',
-        ),
-        actions: [
-
-          IconButton(
-            onPressed:
-            _isSyncing
-                ? null
-                : _syncNow,
-            icon:
-            _isSyncing
-                ? const SizedBox(
-              width: 20,
-              height: 20,
-              child:
-              CircularProgressIndicator(
-                strokeWidth: 2,
-              ),
-            )
-                : const Icon(
-              Icons.sync,
-            ),
-          ),
-        ],
+  void _showSnack(String message, {Duration? duration}) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: duration ?? const Duration(seconds: 4),
       ),
-
-      body: _buildBody(),
     );
   }
 
-  // =========================================================
-  // BODY
-  // =========================================================
+  // ---------------------------------------------------------
+  // DERIVED VALUES
+  //
+  // NOTE: UploadItem has no file-size / byte-progress field, and
+  // getPendingUploads() drops items once uploaded — so this is an
+  // item-count based approximation, not true byte-level progress.
+  // ---------------------------------------------------------
+  int get _uploadedCount =>
+      _items.where((i) => i.status == UploadStatus.uploaded).length;
+
+  double get _batchProgress =>
+      _items.isEmpty ? 0 : _uploadedCount / _items.length;
+
+  @override
+  void dispose() {
+    _syncSubscription?.cancel();
+    super.dispose();
+  }
+
+  // ---------------------------------------------------------
+  // BUILD
+  // ---------------------------------------------------------
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: UploadPalette.bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            UploadHeaderBar(
+              hasInternet: _hasInternet,
+              isSyncing: _isSyncing,
+              onTapSync: _syncNow,
+            ),
+            BatchProgressSection(
+              progress: _batchProgress,
+              uploadedCount: _uploadedCount,
+              totalCount: _items.length,
+            ),
+            SectionLabel(text: 'PENDING UPLOADS (${_items.length})'),
+            Expanded(child: _buildBody()),
+            SyncActionButton(
+              isSyncing: _isSyncing,
+              onPressed: _syncNow,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildBody() {
-
     if (_isLoading) {
       return const Center(
-        child:
-        CircularProgressIndicator(),
+        child: CircularProgressIndicator(color: UploadPalette.blue),
       );
     }
 
     if (_items.isEmpty) {
-
       return RefreshIndicator(
         onRefresh: _loadUploads,
-
+        color: UploadPalette.blue,
+        backgroundColor: UploadPalette.card,
         child: ListView(
-          physics:
-          const AlwaysScrollableScrollPhysics(),
-
+          physics: const AlwaysScrollableScrollPhysics(),
           children: const [
-
             SizedBox(
               height: 300,
-
               child: Center(
                 child: Text(
                   'No pending uploads',
-
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 16,
+                    color: UploadPalette.textSecondary,
                   ),
                 ),
               ),
@@ -544,297 +276,14 @@ class _PendingUploadsScreenState
 
     return RefreshIndicator(
       onRefresh: _loadUploads,
-
+      color: UploadPalette.blue,
+      backgroundColor: UploadPalette.card,
       child: ListView.builder(
-        padding:
-        const EdgeInsets.all(16),
-
-        itemCount:
-        _items.length,
-
-        itemBuilder: (
-            context,
-            index,
-            ) {
-
-          final item =
-          _items[index];
-
-          return _UploadItemCard(
-            item: item,
-          );
-        },
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+        itemCount: _items.length,
+        itemBuilder: (context, index) =>
+            UploadItemCard(item: _items[index]),
       ),
     );
-  }
-}
-
-// =========================================================
-// UPLOAD ITEM CARD
-// =========================================================
-
-class _UploadItemCard
-    extends StatelessWidget {
-
-  final UploadItem item;
-
-  const _UploadItemCard({
-    required this.item,
-  });
-
-  @override
-  Widget build(
-      BuildContext context,
-      ) {
-
-    return Card(
-      margin:
-      const EdgeInsets.only(
-        bottom: 12,
-      ),
-
-      child: Padding(
-        padding:
-        const EdgeInsets.all(12),
-
-        child: Row(
-          children: [
-
-            _buildImage(),
-
-            const SizedBox(
-              width: 12,
-            ),
-
-            Expanded(
-              child:
-              _buildDetails(),
-            ),
-
-            const SizedBox(
-              width: 8,
-            ),
-
-            _buildStatus(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // =========================================================
-  // IMAGE
-  // =========================================================
-
-  Widget _buildImage() {
-
-    return ClipRRect(
-      borderRadius:
-      BorderRadius.circular(8),
-
-      child: Image.file(
-        File(item.localPath),
-
-        width: 70,
-        height: 70,
-
-        fit: BoxFit.cover,
-
-        errorBuilder: (
-            context,
-            error,
-            stackTrace,
-            ) {
-
-          return Container(
-            width: 70,
-            height: 70,
-
-            color:
-            Colors.grey.shade300,
-
-            child: const Icon(
-              Icons.image_not_supported,
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  // =========================================================
-  // DETAILS
-  // =========================================================
-
-  Widget _buildDetails() {
-
-    return Column(
-      crossAxisAlignment:
-      CrossAxisAlignment.start,
-
-      children: [
-
-        const Text(
-          'Batch',
-
-          style: TextStyle(
-            fontWeight:
-            FontWeight.bold,
-          ),
-        ),
-
-        const SizedBox(
-          height: 4,
-        ),
-
-        Text(
-          item.batchId,
-
-          maxLines: 1,
-
-          overflow:
-          TextOverflow.ellipsis,
-        ),
-
-        const SizedBox(
-          height: 4,
-        ),
-
-        Text(
-          item.localPath
-              .split('/')
-              .last,
-
-          maxLines: 1,
-
-          overflow:
-          TextOverflow.ellipsis,
-        ),
-      ],
-    );
-  }
-
-  // =========================================================
-  // STATUS
-  // =========================================================
-
-  Widget _buildStatus() {
-
-    return _StatusBadge(
-      status: item.status,
-    );
-  }
-}
-
-// =========================================================
-// STATUS BADGE
-// =========================================================
-
-class _StatusBadge
-    extends StatelessWidget {
-
-  final UploadStatus status;
-
-  const _StatusBadge({
-    required this.status,
-  });
-
-  @override
-  Widget build(
-      BuildContext context,
-      ) {
-
-    return Container(
-      padding:
-      const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 6,
-      ),
-
-      decoration:
-      BoxDecoration(
-        color:
-        _backgroundColor(),
-
-        borderRadius:
-        BorderRadius.circular(
-          20,
-        ),
-      ),
-
-      child: Text(
-        _text(),
-
-        style: TextStyle(
-          color:
-          _textColor(),
-
-          fontWeight:
-          FontWeight.bold,
-        ),
-      ),
-    );
-  }
-
-  String _text() {
-
-    switch (status) {
-
-      case UploadStatus.pending:
-        return 'Pending';
-
-      case UploadStatus.uploading:
-        return 'Uploading';
-
-      case UploadStatus.uploaded:
-        return 'Uploaded';
-
-      case UploadStatus.failed:
-        return 'Failed';
-    }
-  }
-
-  Color _backgroundColor() {
-
-    switch (status) {
-
-      case UploadStatus.pending:
-        return Colors
-            .orange.shade100;
-
-      case UploadStatus.uploading:
-        return Colors
-            .blue.shade100;
-
-      case UploadStatus.uploaded:
-        return Colors
-            .green.shade100;
-
-      case UploadStatus.failed:
-        return Colors
-            .red.shade100;
-    }
-  }
-
-  Color _textColor() {
-
-    switch (status) {
-
-      case UploadStatus.pending:
-        return Colors
-            .orange.shade900;
-
-      case UploadStatus.uploading:
-        return Colors
-            .blue.shade900;
-
-      case UploadStatus.uploaded:
-        return Colors
-            .green.shade900;
-
-      case UploadStatus.failed:
-        return Colors
-            .red.shade900;
-    }
   }
 }
